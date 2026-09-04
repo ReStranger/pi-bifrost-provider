@@ -1,0 +1,36 @@
+{
+  "name": "pi-bifrost-provider",
+  "version": "0.0.1",
+  "description": "Pi 0.84.4+ extension that registers Bifrost as a native provider",
+  "author": "ReStranger <restranger@disroot.org>",
+  "type": "module",
+  "files": [
+    "index.ts",
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "keywords": [
+    "pi",
+    "bifrost",
+    "provider",
+    "extension",
+    "llm"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.84.4",
+    "@earendil-works/pi-coding-agent": ">=0.84.4"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@types/node": "^24.12.4",
+    "typescript": "^5.9.3"
+  }
+}
