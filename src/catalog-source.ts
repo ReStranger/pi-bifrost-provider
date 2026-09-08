@@ -42,6 +42,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Best-effort extraction of a gateway error message from a parsed error
+// payload ({ error: { message } } | { error } | { message }).
+export function errorMessage(body: unknown): string | undefined {
+	if (typeof body === "string") return body || undefined;
+	if (!isRecord(body)) return undefined;
+	const nested = body.error;
+	if (typeof nested === "string") return nested || undefined;
+	if (isRecord(nested) && typeof nested.message === "string") {
+		return nested.message || undefined;
+	}
+	if (typeof body.message === "string") return body.message || undefined;
+	return undefined;
+}
+
 function parseBifrostListModelsResponse(
 	value: unknown,
 ): BifrostListModelsResponse {
@@ -238,9 +252,17 @@ export async function fetchAuthenticatedCatalog(
 		});
 
 		if (!response.ok) {
-			const body = (await response.text()).slice(0, 500);
+			const raw = await response.text();
+			let detail = raw.slice(0, 500);
+			try {
+				const parsed: unknown = JSON.parse(raw);
+				const message = errorMessage(parsed);
+				if (message) detail = message.slice(0, 500);
+			} catch {
+				// Non-JSON error body: keep the raw slice.
+			}
 			throw new Error(
-				`Bifrost model refresh failed (${response.status}): ${body}`,
+				`Bifrost model refresh failed (${response.status}): ${detail}`,
 			);
 		}
 
