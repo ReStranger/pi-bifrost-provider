@@ -449,3 +449,78 @@ test("transport failures fall back to the datasheet catalog", async () => {
 	assert.equal(result.persist?.checkedAt, 7_777);
 	assert.equal(calls, 2);
 });
+
+test("pending login catalog wins over the offline path with persist", async () => {
+	const { setPendingCatalog } = await import("../src/refresh-models.ts");
+	const pending = [
+		makeModel("openai-completions", "fresh-chat"),
+		makeModel("openai-responses", "fresh-responses"),
+	];
+	try {
+		setPendingCatalog({ models: pending, baseOrigin: "https://login.example" });
+		const result = await refreshVariantModels(
+			"bifrost-completions",
+			"openai-completions",
+			makeRuntime({ now: 7_000 }),
+			makeContext({ allowNetwork: false, credential: undefined }),
+		);
+		assert.deepEqual(result.models, [
+			{
+				...makeModel("openai-completions", "fresh-chat"),
+				provider: "bifrost-completions",
+				baseUrl: "https://login.example/v1",
+			},
+		]);
+		assert.deepEqual(result.persist, {
+			models: result.models,
+			checkedAt: 7_000,
+			baseUrl: "https://login.example",
+		});
+	} finally {
+		setPendingCatalog(undefined);
+	}
+});
+
+test("pending catalog is consumed once per provider variant", async () => {
+	const { setPendingCatalog } = await import("../src/refresh-models.ts");
+	const pending = [
+		makeModel("openai-completions", "fresh-chat"),
+		makeModel("openai-responses", "fresh-responses"),
+	];
+	try {
+		setPendingCatalog({ models: pending, baseOrigin: "https://login.example" });
+		const offline = makeContext({ allowNetwork: false, credential: undefined });
+		const first = await refreshVariantModels(
+			"bifrost-completions",
+			"openai-completions",
+			makeRuntime(),
+			offline,
+		);
+		assert.deepEqual(
+			first.models?.map((model) => model.id),
+			["fresh-chat"],
+		);
+		// The sibling variant still sees the pending catalog.
+		const sibling = await refreshVariantModels(
+			"bifrost-responses",
+			"openai-responses",
+			makeRuntime(),
+			offline,
+		);
+		assert.deepEqual(
+			sibling.models?.map((model) => model.id),
+			["fresh-responses"],
+		);
+		// A second refresh of the first variant finds nothing pending anymore.
+		const second = await refreshVariantModels(
+			"bifrost-completions",
+			"openai-completions",
+			makeRuntime(),
+			offline,
+		);
+		assert.equal(second.models, undefined);
+		assert.equal(second.persist, undefined);
+	} finally {
+		setPendingCatalog(undefined);
+	}
+});

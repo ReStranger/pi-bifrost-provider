@@ -1,9 +1,10 @@
 import {
 	getRefreshIntervalMs,
-	readCredentialBaseOrigin,
+	resolveEffectiveConfig,
 	toApiBase,
 	tryNormalizeBaseOrigin,
 } from "./config.ts";
+import type { BifrostFlagConfig } from "./config.ts";
 import { fetchCatalog, shouldFallbackToDatasheet } from "./catalog-source.ts";
 import { asNumber, filterModelsForApi } from "./model-mapping.ts";
 import type { BifrostRuntime } from "./runtime.ts";
@@ -20,6 +21,30 @@ export type RefreshOutcome = {
 	models?: RegisteredPiModel[];
 	persist?: PersistedCatalogEntry;
 };
+
+export type PendingCatalog = {
+	models: PiModel[];
+	baseOrigin: string;
+};
+
+// Catalog freshly authenticated via /login (or startup discovery). The next
+// refresh of each provider variant publishes it via persist + update — even
+// offline — so a just-configured gateway is usable immediately and survives
+// restarts. Consumption is tracked per provider id because the two variants
+// refresh independently.
+let pendingCatalog: PendingCatalog | undefined;
+const pendingConsumedBy = new Set<string>();
+
+export function setPendingCatalog(catalog: PendingCatalog | undefined): void {
+	pendingCatalog = catalog;
+	pendingConsumedBy.clear();
+}
+
+function takePendingCatalog(providerId: string): PendingCatalog | undefined {
+	if (!pendingCatalog || pendingConsumedBy.has(providerId)) return undefined;
+	pendingConsumedBy.add(providerId);
+	return pendingCatalog;
+}
 
 export function registerModels(
 	models: readonly PiModel[] | readonly PersistedPiModel[] | undefined,
@@ -71,8 +96,37 @@ export async function refreshVariantModels(
 	api: ProviderApi,
 	runtime: BifrostRuntime,
 	context: RefreshContext,
+	flags?: BifrostFlagConfig,
 ): Promise<RefreshOutcome> {
-	const configuredBaseOrigin = readCredentialBaseOrigin(context.credential);
+	// A freshly authenticated catalog wins over everything else, including
+	// the offline path below: /login must be usable immediately.
+	const pending = takePendingCatalog(providerId);
+	if (pending) {
+		const published =
+			registerModels(
+				filterModelsForApi(pending.models, api) ?? [],
+				providerId,
+				pending.baseOrigin,
+			) ?? [];
+		return {
+			models: published,
+			persist: {
+				models: published,
+				checkedAt: runtime.now(),
+				baseUrl: pending.baseOrigin,
+			},
+		};
+	}
+
+	// Same precedence as request-time auth: stored credential > flags > env.
+	// The owns-config guard inside resolveEffectiveConfig keeps a stale
+	// ambient key away from a stored URL and vice versa.
+	const effective = resolveEffectiveConfig({
+		credential: context.credential,
+		flags,
+		env: runtime.env,
+	});
+	const configuredBaseOrigin = effective?.baseOrigin;
 	const restored = restorePersistedModels(
 		providerId,
 		api,
@@ -82,11 +136,7 @@ export async function refreshVariantModels(
 	if (!context.allowNetwork || context.signal.aborted) {
 		return { models: restored };
 	}
-	if (
-		context.credential?.type !== "api_key" ||
-		!context.credential.key ||
-		!configuredBaseOrigin
-	) {
+	if (!effective) {
 		return { models: restored };
 	}
 
@@ -103,14 +153,14 @@ export async function refreshVariantModels(
 
 	try {
 		const allModels = await fetchCatalog(
-			context.credential.key,
-			configuredBaseOrigin,
+			effective.apiKey,
+			effective.baseOrigin,
 			context.signal,
 			runtime,
 		);
 		const filtered = filterModelsForApi(allModels, api) ?? [];
 		const refreshed =
-			registerModels(filtered, providerId, configuredBaseOrigin) ?? [];
+			registerModels(filtered, providerId, effective.baseOrigin) ?? [];
 		return {
 			models: refreshed,
 			persist: {
