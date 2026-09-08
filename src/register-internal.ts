@@ -10,7 +10,8 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createBifrostApiKeyAuth } from "./auth.ts";
-import { refreshVariantModels } from "./refresh-models.ts";
+import type { BifrostFlagConfig } from "./config.ts";
+import { refreshVariantModels, setPendingCatalog } from "./refresh-models.ts";
 import { liveRuntime } from "./runtime.ts";
 import { PROVIDERS } from "./types.ts";
 import type {
@@ -26,16 +27,26 @@ function providerApi(api: ProviderApi) {
 	return openAIResponsesApi();
 }
 
+export type BifrostProviderOptions = {
+	flags?: BifrostFlagConfig;
+};
+
 function createBifrostProvider(
 	variant: ProviderVariant,
 	runtime: BifrostRuntime,
+	options?: BifrostProviderOptions,
 ): Provider<ProviderApi> {
 	let models: readonly Model<ProviderApi>[] = [];
 	const provider = createProvider<ProviderApi>({
 		id: variant.id,
 		name: variant.name,
 		auth: {
-			apiKey: createBifrostApiKeyAuth(),
+			apiKey: createBifrostApiKeyAuth({
+				runtime,
+				flags: options?.flags,
+				onAuthenticated: ({ baseOrigin, models }) =>
+					setPendingCatalog({ models, baseOrigin }),
+			}),
 		},
 		models: [],
 		api: providerApi(variant.api),
@@ -56,6 +67,7 @@ function createBifrostProvider(
 					force: context.force,
 					signal: context.signal,
 				},
+				options?.flags,
 			);
 			if (context.signal.aborted) return;
 			const publication = {
@@ -72,19 +84,25 @@ function createBifrostProvider(
 	};
 }
 
+// NOTE: getModels is intentionally overridden with a reassigning closure
+// instead of mutating the array created by createProvider (e.g. via splice).
+// pi reads the catalog through this getter, so replacing the reference is
+// safe here and keeps refresh publication a single assignment.
 export function registerVariant(
 	pi: ExtensionAPI,
 	variant: ProviderVariant,
 	runtime: BifrostRuntime,
+	options?: BifrostProviderOptions,
 ): void {
-	pi.registerProvider(createBifrostProvider(variant, runtime));
+	pi.registerProvider(createBifrostProvider(variant, runtime, options));
 }
 
 export function registerBifrostProviders(
 	pi: ExtensionAPI,
 	runtime: BifrostRuntime = liveRuntime(),
+	options?: BifrostProviderOptions,
 ): void {
 	for (const variant of PROVIDERS) {
-		registerVariant(pi, variant, runtime);
+		registerVariant(pi, variant, runtime, options);
 	}
 }
