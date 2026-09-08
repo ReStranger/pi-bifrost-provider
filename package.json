@@ -1,15 +1,28 @@
 {
-  "name": "pi-bifrost-provider",
+  "name": "@restranger/pi-bifrost-provider",
   "version": "0.0.1",
   "description": "Pi 0.84.4+ extension that registers Bifrost as a native provider",
   "author": "ReStranger <restranger@disroot.org>",
   "type": "module",
   "files": [
     "index.ts",
-    "src"
+    "src/",
+    "README.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ReStranger/pi-bifrost-provider.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm pack --dry-run"
   },
   "keywords": [
     "pi",
