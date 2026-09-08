@@ -10,11 +10,100 @@ import {
 	canonicalLiveModelId,
 	datasheetHasImageInput,
 	hasImageInput,
+	perMillion,
+	positiveInteger,
 	resolveApisForBifrostModel,
 	supportsReasoning,
 	toPiModelFromDatasheet,
 	toPiModels,
 } from "../src/model-mapping.ts";
+
+test("positiveInteger skips unknown limits and floors floats", () => {
+	assert.equal(positiveInteger(undefined, 0, -5, Number.NaN), undefined);
+	assert.equal(positiveInteger(0, 8_192), 8_192);
+	assert.equal(positiveInteger(16_384.9), 16_384);
+	assert.equal(positiveInteger(), undefined);
+});
+
+test("context window sums input+output tokens when no explicit length", () => {
+	const [model] = toPiModels(
+		{
+			id: "summed",
+			max_input_tokens: 100_000,
+			max_output_tokens: 28_000,
+			supported_methods: ["chat.completions"],
+		},
+		["openai-completions"],
+	);
+	assert.equal(model?.contextWindow, 128_000);
+});
+
+test("maxTokens never exceeds the context window", () => {
+	const [model] = toPiModels(
+		{
+			id: "capped",
+			context_length: 8_192,
+			max_output_tokens: 32_768,
+			supported_methods: ["chat.completions"],
+		},
+		["openai-completions"],
+	);
+	assert.equal(model?.contextWindow, 8_192);
+	assert.equal(model?.maxTokens, 8_192);
+});
+
+test("zero and negative upstream limits fall back to defaults", () => {
+	const [model] = toPiModels(
+		{
+			id: "broken-limits",
+			context_length: 0,
+			max_output_tokens: -100,
+			per_request_limits: { prompt_tokens: 0, completion_tokens: -1 },
+			supported_methods: ["chat.completions"],
+		},
+		["openai-completions"],
+	);
+	assert.equal(model?.contextWindow, 128_000);
+	assert.equal(model?.maxTokens, 16_384);
+});
+
+test("prices assume per-token sources and scale to per-million", () => {
+	// Per-token input: "0.000003"/token == $3 per million tokens.
+	assert.equal(perMillion("0.000003"), 3);
+	assert.equal(perMillion(0.000003), 3);
+	// Contract: a bare `3` is read as 3M$/1M (3_000_000), NOT as $3/M.
+	// Per-million inputs are outside the contract and intentionally unsupported.
+	assert.equal(perMillion(3), 3_000_000);
+
+	const [model] = toPiModels(
+		{
+			id: "priced",
+			pricing: { prompt: "0.000003", completion: "0.000012" },
+			supported_methods: ["chat.completions"],
+		},
+		["openai-completions"],
+	);
+	assert.equal(model?.cost.input, 3);
+	assert.equal(model?.cost.output, 12);
+	// No explicit cache pricing: cache falls back to the input price.
+	assert.equal(model?.cost.cacheRead, 3);
+	assert.equal(model?.cost.cacheWrite, 3);
+
+	const [explicit] = toPiModels(
+		{
+			id: "cached",
+			pricing: {
+				prompt: "0.000003",
+				input_cache_read: "0.0000003",
+				input_cache_write: "0.00000375",
+			},
+			supported_methods: ["chat.completions"],
+		},
+		["openai-completions"],
+	);
+	assert.equal(explicit?.cost.cacheRead, 0.3);
+	assert.equal(explicit?.cost.cacheWrite, 3.75);
+});
 
 test("detects reasoning from multiple Bifrost signals", () => {
 	assert.equal(supportsReasoning({ id: "a", reasoning: {} }), true);
@@ -173,7 +262,13 @@ test("maps live models with explicit or resolved APIs into Pi models", () => {
 	assert.equal(single[0]?.name, "Chat Only");
 	assert.equal(single[0]?.contextWindow, 10_000);
 	assert.equal(single[0]?.maxTokens, 2_000);
-	assert.deepEqual(single[0]?.compat, { maxTokensField: "max_tokens" });
+	assert.deepEqual(single[0]?.compat, {
+		supportsDeveloperRole: true,
+		supportsReasoningEffort: false,
+		supportsUsageInStreaming: true,
+		supportsStrictMode: true,
+		maxTokensField: "max_tokens",
+	});
 
 	const ambiguous = toPiModels({
 		id: "ambiguous",
@@ -262,8 +357,17 @@ test("maps live models with explicit or resolved APIs into Pi models", () => {
 	);
 	assert.deepEqual(dual[0]?.input, ["text", "image"]);
 	assert.equal(dual[0]?.reasoning, true);
-	assert.equal(dual[0]?.compat, undefined);
-	assert.deepEqual(dual[1]?.compat, { maxTokensField: "max_tokens" });
+	assert.deepEqual(dual[0]?.compat, {
+		supportsDeveloperRole: true,
+		supportsStrictMode: true,
+	});
+	assert.deepEqual(dual[1]?.compat, {
+		supportsDeveloperRole: true,
+		supportsReasoningEffort: true,
+		supportsUsageInStreaming: true,
+		supportsStrictMode: true,
+		maxTokensField: "max_tokens",
+	});
 });
 
 test("applies datasheet compat and reasoning metadata", () => {
@@ -276,7 +380,13 @@ test("applies datasheet compat and reasoning metadata", () => {
 		},
 		"openai-completions",
 	);
-	assert.deepEqual(chat?.compat, { maxTokensField: "max_tokens" });
+	assert.deepEqual(chat?.compat, {
+		supportsDeveloperRole: true,
+		supportsReasoningEffort: false,
+		supportsUsageInStreaming: true,
+		supportsStrictMode: true,
+		maxTokensField: "max_tokens",
+	});
 
 	const responses = toPiModelFromDatasheet(
 		"gpt-5.4",
@@ -292,7 +402,10 @@ test("applies datasheet compat and reasoning metadata", () => {
 		},
 		"openai-responses",
 	);
-	assert.equal(responses?.compat, undefined);
+	assert.deepEqual(responses?.compat, {
+		supportsDeveloperRole: true,
+		supportsStrictMode: true,
+	});
 	assert.deepEqual(responses?.thinkingLevelMap, {
 		off: "none",
 		minimal: "minimal",

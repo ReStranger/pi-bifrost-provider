@@ -37,7 +37,24 @@ export function asNumber(value: unknown): number | undefined {
 }
 
 export function perMillion(value: unknown): number {
+	// CONTRACT: every price source (live /models `pricing.*` and the datasheet
+	// `*_cost_per_token` fields) is documented per-token, so the value is
+	// scaled to per-million-tokens here. A per-million input would silently
+	// inflate prices by 1e6 — there is intentionally no magnitude heuristic.
 	return (asNumber(value) ?? 0) * 1_000_000;
+}
+
+// First finite integer value > 0, floored. Upstream limits of 0/negative/NaN
+// mean "unknown", never a real limit.
+export function positiveInteger(
+	...values: Array<number | undefined>
+): number | undefined {
+	for (const value of values) {
+		if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+			return Math.floor(value);
+		}
+	}
+	return undefined;
 }
 
 export function lowerCaseEntries(
@@ -201,11 +218,27 @@ export function buildDatasheetThinkingLevelMap(
 	return changed ? map : undefined;
 }
 
-function compatForApi(api: CatalogApi): PiModel["compat"] | undefined {
+// Asserted compat contract: we trust the Bifrost gateway to honor these
+// flags for every model behind the endpoint (same stance as other pi
+// OpenAI-compatible providers), so they are asserted rather than probed.
+// The only per-model flag is supportsReasoningEffort, driven by the
+// catalog's reasoning signal; everything else is endpoint-wide. Fields we
+// do not assert (store, finish-reason, tool-result shape, thinking format,
+// cache retention, ...) stay unset so pi-ai keeps URL-based auto-detection.
+function compatForApi(api: CatalogApi, reasoning: boolean): PiModel["compat"] {
 	if (api === "openai-completions") {
-		return { maxTokensField: "max_tokens" };
+		return {
+			supportsDeveloperRole: true,
+			supportsReasoningEffort: reasoning,
+			supportsUsageInStreaming: true,
+			supportsStrictMode: true,
+			maxTokensField: "max_tokens",
+		};
 	}
-	return undefined;
+	return {
+		supportsDeveloperRole: true,
+		supportsStrictMode: true,
+	};
 }
 
 export function resolveApisForBifrostModel(
@@ -243,48 +276,69 @@ export function toPiModels(
 		liveHasImageInput || datasheetHasImageInput(datasheetEntry ?? {})
 			? ["text", "image"]
 			: ["text"];
+	const inputTokens = positiveInteger(model.max_input_tokens);
+	const outputTokens = positiveInteger(model.max_output_tokens);
+	const inputPrice = perMillion(
+		model.pricing?.prompt ?? datasheetEntry?.input_cost_per_token,
+	);
+	const contextWindow =
+		positiveInteger(
+			model.context_length,
+			model.top_provider?.context_length,
+			inputTokens !== undefined && outputTokens !== undefined
+				? inputTokens + outputTokens
+				: undefined,
+			model.per_request_limits?.prompt_tokens,
+			datasheetEntry?.max_input_tokens,
+			datasheetEntry?.max_tokens,
+		) ?? 128_000;
+	// min() cap: upstream sometimes reports maxTokens > contextWindow; the
+	// context window always wins.
+	const maxTokens = Math.min(
+		contextWindow,
+		positiveInteger(
+			model.max_output_tokens,
+			model.top_provider?.max_completion_tokens,
+			model.per_request_limits?.completion_tokens,
+			datasheetEntry?.max_output_tokens,
+			datasheetEntry?.max_tokens,
+		) ?? 16_384,
+	);
 	const shared: Omit<PiModel, "api" | "compat"> = {
 		id: model.id,
 		name: model.normalized_name || model.name || model.id,
 		reasoning,
 		input,
 		cost: {
-			input: perMillion(
-				model.pricing?.prompt ?? datasheetEntry?.input_cost_per_token,
-			),
+			input: inputPrice,
 			output: perMillion(
 				model.pricing?.completion ?? datasheetEntry?.output_cost_per_token,
 			),
-			cacheRead: perMillion(
-				model.pricing?.input_cache_read ??
-					datasheetEntry?.cache_read_input_token_cost,
-			),
-			cacheWrite: perMillion(
-				model.pricing?.input_cache_write ??
-					datasheetEntry?.cache_creation_input_token_cost,
-			),
+			// Cache prices fall back to the plain input price. This knowingly
+			// underestimates vendors with paid cache writes (e.g. Anthropic
+			// charges ~1.25x input for cache creation) — an accepted default
+			// until the catalog reports explicit cache pricing.
+			cacheRead:
+				perMillion(
+					model.pricing?.input_cache_read ??
+						datasheetEntry?.cache_read_input_token_cost,
+				) || inputPrice,
+			cacheWrite:
+				perMillion(
+					model.pricing?.input_cache_write ??
+						datasheetEntry?.cache_creation_input_token_cost,
+				) || inputPrice,
 		},
-		contextWindow:
-			model.context_length ??
-			model.max_input_tokens ??
-			model.top_provider?.context_length ??
-			datasheetEntry?.max_input_tokens ??
-			datasheetEntry?.max_tokens ??
-			128_000,
-		maxTokens:
-			model.max_output_tokens ??
-			model.top_provider?.max_completion_tokens ??
-			model.per_request_limits?.completion_tokens ??
-			datasheetEntry?.max_output_tokens ??
-			datasheetEntry?.max_tokens ??
-			16_384,
+		contextWindow,
+		maxTokens,
 	};
 	if (thinkingLevelMap) shared.thinkingLevelMap = thinkingLevelMap;
 
-	return apis.map((api) => {
-		const compat = compatForApi(api);
-		return compat ? { ...shared, api, compat } : { ...shared, api };
-	});
+	return apis.map((api) => ({
+		...shared,
+		api,
+		compat: compatForApi(api, reasoning),
+	}));
 }
 
 export function canonicalLiveModelId(id: string): string | undefined {
@@ -375,8 +429,7 @@ export function toPiModelFromDatasheet(
 	};
 	const thinkingLevelMap = buildDatasheetThinkingLevelMap(entry);
 	if (thinkingLevelMap) model.thinkingLevelMap = thinkingLevelMap;
-	const compat = compatForApi(api);
-	if (compat) model.compat = compat;
+	model.compat = compatForApi(api, model.reasoning);
 	return model;
 }
 

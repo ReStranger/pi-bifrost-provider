@@ -1,4 +1,8 @@
-import type { ModelsStoreEntry } from "@earendil-works/pi-ai";
+import type {
+	ModelsStoreEntry,
+	OpenAICompletionsCompat,
+	OpenAIResponsesCompat,
+} from "@earendil-works/pi-ai";
 
 export const BIFROST_API_KEY_ENV = "BIFROST_API_KEY";
 export const BIFROST_BASE_URL_ENV = "BIFROST_BASE_URL";
@@ -127,9 +131,10 @@ export type PiModel = {
 	};
 	contextWindow: number;
 	maxTokens: number;
-	compat?: {
-		maxTokensField?: "max_completion_tokens" | "max_tokens";
-	};
+	// Compatibility flags asserted for the Bifrost gateway (see compatForApi in
+	// model-mapping.ts). Persisted catalogs predating these fields still load:
+	// every flag is optional and appears after the next refresh.
+	compat?: OpenAICompletionsCompat | OpenAIResponsesCompat;
 };
 
 export type RegisteredPiModel = PiModel & {
