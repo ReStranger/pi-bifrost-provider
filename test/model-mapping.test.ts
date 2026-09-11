@@ -185,16 +185,12 @@ test("detects provider APIs only from explicit chat and responses markers", () =
 	]);
 });
 
-test("builds a thinking level map with null gaps", () => {
+test("builds positive-only thinking level maps", () => {
 	assert.deepEqual(
 		buildThinkingLevelMap({ mandatory: true, supported_efforts: ["low", "max"] }),
 		{
 			off: null,
-			minimal: null,
 			low: "low",
-			medium: null,
-			high: null,
-			xhigh: "max",
 			max: "max",
 		},
 	);
@@ -212,11 +208,7 @@ test("builds datasheet thinking maps from supported effort flags", () => {
 		{
 			off: "none",
 			minimal: "minimal",
-			low: null,
-			medium: null,
-			high: null,
 			xhigh: "xhigh",
-			max: null,
 		},
 	);
 });
@@ -304,11 +296,7 @@ test("maps live models with explicit or resolved APIs into Pi models", () => {
 	assert.deepEqual(enriched[0]?.thinkingLevelMap, {
 		off: "none",
 		minimal: "minimal",
-		low: null,
-		medium: null,
-		high: null,
 		xhigh: "xhigh",
-		max: null,
 	});
 	assert.deepEqual(enriched[0]?.input, ["text", "image"]);
 	assert.equal(enriched[0]?.contextWindow, 1_050_000);
@@ -338,10 +326,7 @@ test("maps live models with explicit or resolved APIs into Pi models", () => {
 	assert.equal(liveWins[0]?.maxTokens, 2_048);
 	assert.equal(liveWins[0]?.cost.input, 3);
 	assert.deepEqual(liveWins[0]?.thinkingLevelMap, {
-		minimal: null,
-		low: null,
 		medium: "medium",
-		high: null,
 	});
 
 	const dual = toPiModels({
@@ -409,10 +394,6 @@ test("applies datasheet compat and reasoning metadata", () => {
 	assert.deepEqual(responses?.thinkingLevelMap, {
 		off: "none",
 		minimal: "minimal",
-		low: null,
-		medium: null,
-		high: null,
 		xhigh: "xhigh",
-		max: null,
 	});
 });

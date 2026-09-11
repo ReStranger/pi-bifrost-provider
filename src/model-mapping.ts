@@ -126,6 +126,9 @@ export function buildThinkingLevelMap(
 ): PiModel["thinkingLevelMap"] {
 	if (!reasoning) return undefined;
 
+	// Missing keys let pi keep its default reasoning levels. Only emit
+	// positive mappings (or an explicit mandatory-off restriction) instead of
+	// synthesizing null gaps from partial Bifrost metadata.
 	const map: NonNullable<PiModel["thinkingLevelMap"]> = {};
 	let changed = false;
 
@@ -135,21 +138,57 @@ export function buildThinkingLevelMap(
 	}
 
 	const supported = new Set(lowerCaseEntries(reasoning.supported_efforts));
-	if (supported.size > 0) {
-		for (const level of ["minimal", "low", "medium", "high"] as const) {
-			map[level] = supported.has(level) ? level : null;
+	if (supported.has("none") && map.off === undefined) {
+		map.off = "none";
+		changed = true;
+	}
+	for (const level of [
+		"minimal",
+		"low",
+		"medium",
+		"high",
+		"xhigh",
+		"max",
+	] as const) {
+		if (supported.has(level)) {
+			map[level] = level;
 			changed = true;
 		}
+	}
 
-		if (supported.has("xhigh")) {
+	const defaultEffort = reasoning.default_effort?.trim().toLowerCase();
+	if (defaultEffort === "none") {
+		if (map.off === undefined) {
+			map.off = "none";
+			changed = true;
+		}
+	} else if (defaultEffort === "minimal") {
+		if (map.minimal === undefined) {
+			map.minimal = "minimal";
+			changed = true;
+		}
+	} else if (defaultEffort === "low") {
+		if (map.low === undefined) {
+			map.low = "low";
+			changed = true;
+		}
+	} else if (defaultEffort === "medium") {
+		if (map.medium === undefined) {
+			map.medium = "medium";
+			changed = true;
+		}
+	} else if (defaultEffort === "high") {
+		if (map.high === undefined) {
+			map.high = "high";
+			changed = true;
+		}
+	} else if (defaultEffort === "xhigh") {
+		if (map.xhigh === undefined) {
 			map.xhigh = "xhigh";
 			changed = true;
-		} else if (supported.has("max")) {
-			map.xhigh = "max";
-			changed = true;
 		}
-
-		if (supported.has("max")) {
+	} else if (defaultEffort === "max") {
+		if (map.max === undefined) {
 			map.max = "max";
 			changed = true;
 		}
@@ -163,56 +202,74 @@ export function buildDatasheetThinkingLevelMap(
 ): PiModel["thinkingLevelMap"] {
 	if (!entry?.supports_reasoning) return undefined;
 
-	const supportsEfforts = {
-		off: entry.supports_none_reasoning_effort === true ? "none" : undefined,
-		minimal:
-			entry.supports_minimal_reasoning_effort === true ? "minimal" : undefined,
-		low: entry.supports_low_reasoning_effort === true ? "low" : undefined,
-		medium:
-			entry.supports_medium_reasoning_effort === true ? "medium" : undefined,
-		high: entry.supports_high_reasoning_effort === true ? "high" : undefined,
-		xhigh: entry.supports_xhigh_reasoning_effort === true ? "xhigh" : undefined,
-		max: entry.supports_max_reasoning_effort === true ? "max" : undefined,
-	} as const;
-	const hasExplicitSupport = Object.values(supportsEfforts).some(
-		(value) => value !== undefined,
-	);
 	const map: NonNullable<PiModel["thinkingLevelMap"]> = {};
 	let changed = false;
 
-	if (hasExplicitSupport) {
-		map.off = supportsEfforts.off ?? null;
-		map.minimal = supportsEfforts.minimal ?? null;
-		map.low = supportsEfforts.low ?? null;
-		map.medium = supportsEfforts.medium ?? null;
-		map.high = supportsEfforts.high ?? null;
-		map.xhigh = supportsEfforts.xhigh ?? null;
-		map.max = supportsEfforts.max ?? null;
+	if (entry.supports_none_reasoning_effort === true) {
+		map.off = "none";
+		changed = true;
+	}
+	if (entry.supports_minimal_reasoning_effort === true) {
+		map.minimal = "minimal";
+		changed = true;
+	}
+	if (entry.supports_low_reasoning_effort === true) {
+		map.low = "low";
+		changed = true;
+	}
+	if (entry.supports_medium_reasoning_effort === true) {
+		map.medium = "medium";
+		changed = true;
+	}
+	if (entry.supports_high_reasoning_effort === true) {
+		map.high = "high";
+		changed = true;
+	}
+	if (entry.supports_xhigh_reasoning_effort === true) {
+		map.xhigh = "xhigh";
+		changed = true;
+	}
+	if (entry.supports_max_reasoning_effort === true) {
+		map.max = "max";
 		changed = true;
 	}
 
 	const defaultEffort = entry.default_reasoning_effort?.trim().toLowerCase();
 	if (defaultEffort === "none") {
-		map.off = "none";
-		changed = true;
+		if (map.off === undefined) {
+			map.off = "none";
+			changed = true;
+		}
 	} else if (defaultEffort === "minimal") {
-		map.minimal = "minimal";
-		changed = true;
+		if (map.minimal === undefined) {
+			map.minimal = "minimal";
+			changed = true;
+		}
 	} else if (defaultEffort === "low") {
-		map.low = "low";
-		changed = true;
+		if (map.low === undefined) {
+			map.low = "low";
+			changed = true;
+		}
 	} else if (defaultEffort === "medium") {
-		map.medium = "medium";
-		changed = true;
+		if (map.medium === undefined) {
+			map.medium = "medium";
+			changed = true;
+		}
 	} else if (defaultEffort === "high") {
-		map.high = "high";
-		changed = true;
+		if (map.high === undefined) {
+			map.high = "high";
+			changed = true;
+		}
 	} else if (defaultEffort === "xhigh") {
-		map.xhigh = "xhigh";
-		changed = true;
+		if (map.xhigh === undefined) {
+			map.xhigh = "xhigh";
+			changed = true;
+		}
 	} else if (defaultEffort === "max") {
-		map.max = "max";
-		changed = true;
+		if (map.max === undefined) {
+			map.max = "max";
+			changed = true;
+		}
 	}
 
 	return changed ? map : undefined;

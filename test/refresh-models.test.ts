@@ -324,11 +324,6 @@ test("successful live refresh with no explicit markers still uses datasheet enri
 	assert.deepEqual(result.models?.[0]?.thinkingLevelMap, {
 		off: "none",
 		minimal: "minimal",
-		low: null,
-		medium: null,
-		high: null,
-		xhigh: null,
-		max: null,
 	});
 	assert.deepEqual(result.persist, {
 		models: result.models ?? [],

@@ -226,11 +226,7 @@ test("enriches unclassified live models from datasheet and defaults unknown mode
 	assert.deepEqual(enrichedResponses?.thinkingLevelMap, {
 		off: "none",
 		minimal: "minimal",
-		low: null,
-		medium: null,
-		high: null,
 		xhigh: "xhigh",
-		max: null,
 	});
 	assert.deepEqual(enrichedResponses?.input, ["text", "image"]);
 	assert.equal(enrichedResponses?.contextWindow, 1_050_000);
