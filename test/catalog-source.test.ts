@@ -149,10 +149,7 @@ test("uses explicit live markers without datasheet enrichment when metadata is p
 	assert.equal(calls, 1);
 	assert.deepEqual(apisForId(models, "response-model"), ["openai-responses"]);
 	assert.deepEqual(apisForId(models, "chat-model"), ["openai-completions"]);
-	assert.deepEqual(apisForId(models, "dual-model"), [
-		"openai-responses",
-		"openai-completions",
-	]);
+	assert.deepEqual(apisForId(models, "dual-model"), ["openai-responses"]);
 });
 
 test("enriches unclassified live models from datasheet and defaults unknown models to chat", async () => {
@@ -236,10 +233,7 @@ test("enriches unclassified live models from datasheet and defaults unknown mode
 	assert.deepEqual(apisForId(models, "provider/claude-sonnet"), [
 		"openai-completions",
 	]);
-	assert.deepEqual(apisForId(models, "provider/dual-api"), [
-		"openai-responses",
-		"openai-completions",
-	]);
+	assert.deepEqual(apisForId(models, "provider/dual-api"), ["openai-responses"]);
 	assert.deepEqual(apisForId(models, "provider/unknown"), [
 		"openai-completions",
 	]);

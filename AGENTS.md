@@ -1,15 +1,18 @@
 # AGENTS.md — pi-bifrost-provider
 
-Pi extension registering getbifrost.ai as two native providers:
-`bifrost-responses` (`openai-responses`) and `bifrost-completions`
-(`openai-completions`). Catalog: `GET {origin}/v1/models?page_size=200`
-(+ `page_token` pagination), enriched with the Bifrost datasheet.
+Pi extension registering getbifrost.ai as a single native provider,
+`bifrost`, serving both OpenAI-compatible endpoints via an api-map
+(`openai-responses` + `openai-completions`, dispatched per model by
+`model.api`). Each model is published once: dual-endpoint models resolve
+to responses (see 11), chat-only models to completions. Catalog:
+`GET {origin}/v1/models?page_size=200` (+ `page_token` pagination),
+enriched with the Bifrost datasheet.
 
 ## Contracts that are easy to break
 
 1. **Config precedence: stored `/login` credential > CLI flags > env.**
    `resolveEffectiveConfig` (`src/config.ts`) is the single implementation,
-   shared by request-time auth (`src/auth.ts`) and `refreshVariantModels`.
+   shared by request-time auth (`src/auth.ts`) and `refreshBifrostModels`.
    Do not reimplement precedence anywhere else.
 2. **Owns-config guard.** When the stored credential carries its own
    `BIFROST_BASE_URL`, ambient keys/flags must NOT leak into it (URL changed
@@ -20,13 +23,13 @@ Pi extension registering getbifrost.ai as two native providers:
    any network call. There is no keyless mode and no placeholder key —
    a different Bifrost product has those; this gateway does not.
 4. **Login catalog goes through the pending slot, not the network path.**
-   `onAuthenticated` → `setPendingCatalog`, consumed once per provider id by
-   the next refresh (even offline) via `persist + update`. Same slot is used
+   `onAuthenticated` → `setPendingCatalog`, consumed one-shot by the next
+   refresh (even offline) via `persist + update`. Same slot is used
    by startup discovery. Always `setPendingCatalog(undefined)` in tests that
    set it — the slot is module-global.
 5. **Startup entrypoint (`index.ts`) never throws.** Discovery failure warns
    to stderr (`pi-bifrost-provider: startup model discovery failed…`) and
-   providers register with an empty catalog; recovery via
+   provider registers with an empty catalog; recovery via
    refresh/persisted. `AbortSignal.timeout(15_000)` bounds discovery.
 6. **Prices are per-token everywhere.** `perMillion` in `src/model-mapping.ts`
    multiplies by 1e6 assuming per-token inputs. A per-million input value
@@ -51,6 +54,14 @@ Pi extension registering getbifrost.ai as two native providers:
     propagate; only transport failures fall back to the datasheet catalog.
     Old persisted models without the newer compat fields keep working; new
     fields appear after the first refresh.
+11. **Single-API publication: responses wins for dual-endpoint models.**
+    `resolvePreferredApi` (`src/model-mapping.ts`) returns the first of
+    `resolveApisForBifrostModel` (responses sorts first); unknown models
+    default to completions. Live dedupe and datasheet `bestModels` are
+    keyed by bare model id (no `${api}:` prefix) — a responses entry wins
+    over completions regardless of score. Do not reintroduce per-api
+    duplicates: pi's `Models.getModel` is `.find(id)` and would collapse
+    them.
 
 ## Test rules
 

@@ -13,6 +13,7 @@ import {
 	perMillion,
 	positiveInteger,
 	resolveApisForBifrostModel,
+	resolvePreferredApi,
 	supportsReasoning,
 	toPiModelFromDatasheet,
 	toPiModels,
@@ -237,6 +238,24 @@ test("canonicalizes live ids and resolves live/datasheet/fallback APIs", () => {
 	assert.deepEqual(resolveApisForBifrostModel({ id: "unknown" }), [
 		"openai-completions",
 	]);
+});
+
+test("resolvePreferredApi prefers responses for dual-endpoint models", () => {
+	assert.equal(
+		resolvePreferredApi({
+			id: "dual-model",
+			supported_methods: ["chat.completions", "responses"],
+		}),
+		"openai-responses",
+	);
+	assert.equal(
+		resolvePreferredApi({
+			id: "chat-only",
+			supported_methods: ["chat.completions"],
+		}),
+		"openai-completions",
+	);
+	assert.equal(resolvePreferredApi({ id: "unknown" }), "openai-completions");
 });
 
 test("maps live models with explicit or resolved APIs into Pi models", () => {

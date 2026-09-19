@@ -10,21 +10,17 @@ export const DEFAULT_REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 8_000;
 export const DATASHEET_URL = "https://getbifrost.ai/datasheet";
 
+export const BIFROST_PROVIDER_ID = "bifrost";
+export const BIFROST_PROVIDER_NAME = "Bifrost";
+
 export const PROVIDERS = [
 	{
-		id: "bifrost-responses",
-		name: "Bifrost (Responses)",
-		api: "openai-responses",
-	},
-	{
-		id: "bifrost-completions",
-		name: "Bifrost (Completions)",
-		api: "openai-completions",
+		id: BIFROST_PROVIDER_ID,
+		name: BIFROST_PROVIDER_NAME,
 	},
 ] as const;
 
-export type ProviderApi = (typeof PROVIDERS)[number]["api"];
-export type ProviderVariant = (typeof PROVIDERS)[number];
+export type ProviderApi = "openai-completions" | "openai-responses";
 
 export type CatalogApi = "openai-completions" | "openai-responses";
 

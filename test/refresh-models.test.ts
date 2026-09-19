@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { toApiBase } from "../src/config.ts";
 import {
-	refreshVariantModels,
+	refreshBifrostModels,
 	restorePersistedModels,
 } from "../src/refresh-models.ts";
 import type { BifrostRuntime } from "../src/runtime.ts";
@@ -83,9 +83,7 @@ function makeContext(overrides: Partial<RefreshContext> = {}): RefreshContext {
 }
 
 test("offline refresh returns restored models", async () => {
-	const result = await refreshVariantModels(
-		"bifrost-completions",
-		"openai-completions",
+	const result = await refreshBifrostModels(
 		makeRuntime(),
 		makeContext({
 			allowNetwork: false,
@@ -101,7 +99,7 @@ test("offline refresh returns restored models", async () => {
 	assert.deepEqual(result.models, [
 		{
 			...makeModel("openai-completions", "restored"),
-			provider: "bifrost-completions",
+			provider: "bifrost",
 			baseUrl: "https://stored.example/v1",
 		},
 	]);
@@ -110,8 +108,7 @@ test("offline refresh returns restored models", async () => {
 
 test("stored catalogs are endpoint-scoped by base URL", () => {
 	const restored = restorePersistedModels(
-		"bifrost-completions",
-		"openai-completions",
+		"bifrost",
 		makeStoredCatalog("openai-completions", "restored", "https://stored.example"),
 		"https://other.example",
 	);
@@ -120,8 +117,7 @@ test("stored catalogs are endpoint-scoped by base URL", () => {
 
 test("stored empty catalogs restore as empty arrays", () => {
 	const restored = restorePersistedModels(
-		"bifrost-responses",
-		"openai-responses",
+		"bifrost",
 		{
 			models: [],
 			checkedAt: 0,
@@ -134,9 +130,7 @@ test("stored empty catalogs restore as empty arrays", () => {
 
 test("missing configured base URL returns restored models without network", async () => {
 	let calls = 0;
-	const result = await refreshVariantModels(
-		"bifrost-completions",
-		"openai-completions",
+	const result = await refreshBifrostModels(
 		makeRuntime({
 			fetch: async () => {
 				calls += 1;
@@ -162,9 +156,7 @@ test("missing configured base URL returns restored models without network", asyn
 
 test("fresh stored models respect TTL and skip the network", async () => {
 	let calls = 0;
-	const result = await refreshVariantModels(
-		"bifrost-completions",
-		"openai-completions",
+	const result = await refreshBifrostModels(
 		makeRuntime({
 			env: { BIFROST_REFRESH_INTERVAL_MS: "1000" },
 			now: 1_000,
@@ -194,9 +186,7 @@ test("fresh stored models respect TTL and skip the network", async () => {
 
 test("successful refresh uses the credential base URL and preserves catalog shape", async () => {
 	let fetchedUrl = "";
-	const result = await refreshVariantModels(
-		"bifrost-completions",
-		"openai-completions",
+	const result = await refreshBifrostModels(
 		makeRuntime({
 			now: 4_321,
 			fetch: async (url) => {
@@ -237,7 +227,7 @@ test("successful refresh uses the credential base URL and preserves catalog shap
 		[
 			{
 				id: "chat-only",
-				provider: "bifrost-completions",
+				provider: "bifrost",
 				baseUrl: "https://credential.example/v1",
 			},
 		],
@@ -249,10 +239,8 @@ test("successful refresh uses the credential base URL and preserves catalog shap
 	});
 });
 
-test("successful refresh persists empty arrays for unmatched variants", async () => {
-	const result = await refreshVariantModels(
-		"bifrost-responses",
-		"openai-responses",
+test("successful refresh publishes a single-API catalog", async () => {
+	const result = await refreshBifrostModels(
 		makeRuntime({
 			now: 5_555,
 			fetch: async () =>
@@ -263,6 +251,10 @@ test("successful refresh persists empty arrays for unmatched variants", async ()
 								id: "chat-only",
 								supported_methods: ["chat.completions"],
 							},
+							{
+								id: "dual-model",
+								supported_methods: ["chat.completions", "responses"],
+							},
 						],
 					}),
 					{ status: 200, headers: { "content-type": "application/json" } },
@@ -271,9 +263,15 @@ test("successful refresh persists empty arrays for unmatched variants", async ()
 		makeContext({ force: true }),
 	);
 
-	assert.deepEqual(result.models, []);
+	assert.deepEqual(
+		result.models?.map((model) => ({ id: model.id, api: model.api })),
+		[
+			{ id: "chat-only", api: "openai-completions" },
+			{ id: "dual-model", api: "openai-responses" },
+		],
+	);
 	assert.deepEqual(result.persist, {
-		models: [],
+		models: result.models ?? [],
 		checkedAt: 5_555,
 		baseUrl: "https://credential.example",
 	});
@@ -281,9 +279,7 @@ test("successful refresh persists empty arrays for unmatched variants", async ()
 
 test("successful live refresh with no explicit markers still uses datasheet enrichment", async () => {
 	let calls = 0;
-	const result = await refreshVariantModels(
-		"bifrost-responses",
-		"openai-responses",
+	const result = await refreshBifrostModels(
 		makeRuntime({
 			now: 6_666,
 			fetch: async () => {
@@ -334,9 +330,7 @@ test("successful live refresh with no explicit markers still uses datasheet enri
 
 test("datasheet enrichment failures fall back to chat-only instead of failing refresh", async () => {
 	let calls = 0;
-	const result = await refreshVariantModels(
-		"bifrost-completions",
-		"openai-completions",
+	const result = await refreshBifrostModels(
 		makeRuntime({
 			now: 6_777,
 			fetch: async () => {
@@ -356,7 +350,7 @@ test("datasheet enrichment failures fall back to chat-only instead of failing re
 	assert.equal(calls, 2);
 	assert.deepEqual(
 		result.models?.map((model) => ({ id: model.id, provider: model.provider })),
-		[{ id: "mystery-model", provider: "bifrost-completions" }],
+		[{ id: "mystery-model", provider: "bifrost" }],
 	);
 	assert.deepEqual(result.persist, {
 		models: result.models ?? [],
@@ -367,9 +361,7 @@ test("datasheet enrichment failures fall back to chat-only instead of failing re
 
 test("timeouts without restored models return undefined", async () => {
 	let calls = 0;
-	const result = await refreshVariantModels(
-		"bifrost-completions",
-		"openai-completions",
+	const result = await refreshBifrostModels(
 		makeRuntime({
 			fetch: async () => {
 				calls += 1;
@@ -392,9 +384,7 @@ test("HTTP failures from /models do not trigger datasheet fallback", async () =>
 
 	await assert.rejects(
 		() =>
-			refreshVariantModels(
-				"bifrost-completions",
-				"openai-completions",
+			refreshBifrostModels(
 				makeRuntime({
 					fetch: async () => {
 						calls += 1;
@@ -410,9 +400,7 @@ test("HTTP failures from /models do not trigger datasheet fallback", async () =>
 
 test("transport failures fall back to the datasheet catalog", async () => {
 	let calls = 0;
-	const result = await refreshVariantModels(
-		"bifrost-completions",
-		"openai-completions",
+	const result = await refreshBifrostModels(
 		makeRuntime({
 			now: 7_777,
 			fetch: async () => {
@@ -453,16 +441,19 @@ test("pending login catalog wins over the offline path with persist", async () =
 	];
 	try {
 		setPendingCatalog({ models: pending, baseOrigin: "https://login.example" });
-		const result = await refreshVariantModels(
-			"bifrost-completions",
-			"openai-completions",
+		const result = await refreshBifrostModels(
 			makeRuntime({ now: 7_000 }),
 			makeContext({ allowNetwork: false, credential: undefined }),
 		);
 		assert.deepEqual(result.models, [
 			{
 				...makeModel("openai-completions", "fresh-chat"),
-				provider: "bifrost-completions",
+				provider: "bifrost",
+				baseUrl: "https://login.example/v1",
+			},
+			{
+				...makeModel("openai-responses", "fresh-responses"),
+				provider: "bifrost",
 				baseUrl: "https://login.example/v1",
 			},
 		]);
@@ -476,7 +467,7 @@ test("pending login catalog wins over the offline path with persist", async () =
 	}
 });
 
-test("pending catalog is consumed once per provider variant", async () => {
+test("pending catalog is consumed once", async () => {
 	const { setPendingCatalog } = await import("../src/refresh-models.ts");
 	const pending = [
 		makeModel("openai-completions", "fresh-chat"),
@@ -485,34 +476,13 @@ test("pending catalog is consumed once per provider variant", async () => {
 	try {
 		setPendingCatalog({ models: pending, baseOrigin: "https://login.example" });
 		const offline = makeContext({ allowNetwork: false, credential: undefined });
-		const first = await refreshVariantModels(
-			"bifrost-completions",
-			"openai-completions",
-			makeRuntime(),
-			offline,
-		);
+		const first = await refreshBifrostModels(makeRuntime(), offline);
 		assert.deepEqual(
 			first.models?.map((model) => model.id),
-			["fresh-chat"],
+			["fresh-chat", "fresh-responses"],
 		);
-		// The sibling variant still sees the pending catalog.
-		const sibling = await refreshVariantModels(
-			"bifrost-responses",
-			"openai-responses",
-			makeRuntime(),
-			offline,
-		);
-		assert.deepEqual(
-			sibling.models?.map((model) => model.id),
-			["fresh-responses"],
-		);
-		// A second refresh of the first variant finds nothing pending anymore.
-		const second = await refreshVariantModels(
-			"bifrost-completions",
-			"openai-completions",
-			makeRuntime(),
-			offline,
-		);
+		// A second refresh finds nothing pending anymore.
+		const second = await refreshBifrostModels(makeRuntime(), offline);
 		assert.equal(second.models, undefined);
 		assert.equal(second.persist, undefined);
 	} finally {

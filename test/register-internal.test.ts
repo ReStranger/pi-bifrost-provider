@@ -83,7 +83,7 @@ function makeTempPackageDir(): string {
 	return dir;
 }
 
-test("registers bifrost completions and responses providers", async () => {
+test("registers the merged bifrost provider", async () => {
 	const dir = makeTempPackageDir();
 	const [{ registerBifrostProviders }] = await Promise.all([
 		import(pathToFileURL(join(dir, "src", "register-internal.ts")).href),
@@ -124,11 +124,11 @@ test("registers bifrost completions and responses providers", async () => {
 
 	assert.deepEqual(
 		registered.map((provider) => provider.id),
-		["bifrost-responses", "bifrost-completions"],
+		["bifrost"],
 	);
 	assert.deepEqual(
 		registered.map((provider) => provider.name),
-		["Bifrost (Responses)", "Bifrost (Completions)"],
+		["Bifrost"],
 	);
 	for (const provider of registered) {
 		assert.equal(typeof provider.auth.apiKey?.login, "function");
@@ -151,30 +151,14 @@ test("registers bifrost completions and responses providers", async () => {
 		});
 	}
 
-	const responses = registered.find(
-		(provider) => provider.id === "bifrost-responses",
+	const provider = registered[0];
+	assert.deepEqual(
+		provider?.getModels().map((model: any) => model.id),
+		["chat-model", "response-model", "dual-model"],
 	);
 	assert.deepEqual(
-		responses?.getModels().map((model: any) => model.id),
-		["response-model", "dual-model"],
-	);
-	assert.ok(
-		responses
-			?.getModels()
-			.every((model: any) => model.api === "openai-responses"),
-	);
-
-	const completions = registered.find(
-		(provider) => provider.id === "bifrost-completions",
-	);
-	assert.deepEqual(
-		completions?.getModels().map((model: any) => model.id),
-		["chat-model", "dual-model"],
-	);
-	assert.ok(
-		completions
-			?.getModels()
-			.every((model: any) => model.api === "openai-completions"),
+		provider?.getModels().map((model: any) => model.api),
+		["openai-completions", "openai-responses", "openai-responses"],
 	);
 });
 
@@ -208,10 +192,8 @@ test("streams chat completions with injected fetch and bearer auth", async () =>
 		now: () => 1_234,
 	};
 	registerBifrostProviders(pi, runtime);
-	const completions = registered.find(
-		(provider) => provider.id === "bifrost-completions",
-	);
-	await completions.refreshModels({
+	const provider = registered[0];
+	await provider.refreshModels({
 		credential: {
 			type: "api_key",
 			key: "secret",
@@ -228,8 +210,8 @@ test("streams chat completions with injected fetch and bearer auth", async () =>
 	});
 
 	const models = createModels();
-	models.setProvider(completions);
-	const model = models.getModel("bifrost-completions", "chat-model");
+	models.setProvider(provider);
+	const model = models.getModel("bifrost", "chat-model");
 	assert.ok(model);
 
 	const seen: { url?: string; authorization?: string | null; body?: any } = {};
@@ -260,6 +242,98 @@ test("streams chat completions with injected fetch and bearer auth", async () =>
 	assert.equal(seen.url, "https://credential.example/v1/chat/completions");
 	assert.equal(seen.authorization, "Bearer stream-key");
 	assert.equal(seen.body?.model, "chat-model");
+	assert.equal(
+		message.content
+			.filter((block: any) => block.type === "text")
+			.map((block: any) => block.text)
+			.join(""),
+		"Hello world",
+	);
+	assert.equal(message.stopReason, "stop");
+});
+
+test("streams responses with injected fetch and bearer auth", async () => {
+	const dir = makeTempPackageDir();
+	const [{ registerBifrostProviders }] = await Promise.all([
+		import(pathToFileURL(join(dir, "src", "register-internal.ts")).href),
+	]);
+	const { createModels } = await import("@earendil-works/pi-ai");
+
+	const registered: Array<any> = [];
+	const pi = {
+		registerProvider(provider: unknown) {
+			registered.push(provider);
+		},
+	};
+	const runtime = {
+		env: {},
+		fetch: async () =>
+			new Response(
+				JSON.stringify({
+					data: [
+						{
+							id: "dual-model",
+							supported_methods: ["chat.completions", "responses"],
+						},
+					],
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			),
+		now: () => 1_234,
+	};
+	registerBifrostProviders(pi, runtime);
+	const provider = registered[0];
+	await provider.refreshModels({
+		credential: {
+			type: "api_key",
+			key: "secret",
+			env: { BIFROST_BASE_URL: "https://credential.example" },
+		},
+		stored: undefined,
+		allowNetwork: true,
+		force: true,
+		signal: new AbortController().signal,
+		publish: async (publication: { update?: () => void }) => {
+			publication.update?.();
+			return true;
+		},
+	});
+
+	const models = createModels();
+	models.setProvider(provider);
+	const model = models.getModel("bifrost", "dual-model");
+	assert.ok(model);
+	assert.equal(model.api, "openai-responses");
+
+	const seen: { url?: string; authorization?: string | null; body?: any } = {};
+	const sse = [
+		'data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","content":[]}}\n\n',
+		'data: {"type":"response.output_text.delta","output_index":0,"delta":"Hello"}\n\n',
+		'data: {"type":"response.output_text.delta","output_index":0,"delta":" world"}\n\n',
+		'data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_1","type":"message","content":[{"type":"output_text","text":"Hello world"}]}}\n\n',
+		'data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}\n\n',
+	].join("");
+	const message = await models.completeSimple(
+		model,
+		{ messages: [{ role: "user", content: "Say hi", timestamp: 1 }] },
+		{
+			apiKey: "stream-key",
+			env: { BIFROST_BASE_URL: "https://credential.example" },
+			fetch: (async (url: any, init: any) => {
+				seen.url = String(url);
+				seen.authorization = new Headers(init?.headers).get("authorization");
+				seen.body = JSON.parse(String(init?.body ?? "{}"));
+				return new Response(sse, {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				});
+			}) as typeof fetch,
+		},
+	);
+
+	assert.equal(seen.url, "https://credential.example/v1/responses");
+	assert.equal(seen.authorization, "Bearer stream-key");
+	assert.equal(seen.body?.model, "dual-model");
 	assert.equal(
 		message.content
 			.filter((block: any) => block.type === "text")

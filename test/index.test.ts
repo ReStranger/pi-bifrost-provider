@@ -72,7 +72,7 @@ test("registers flags and providers without discovery when unconfigured", async 
 	);
 	assert.deepEqual(
 		registeredProviders.map((provider: any) => provider.id),
-		["bifrost-responses", "bifrost-completions"],
+		["bifrost"],
 	);
 	assert.deepEqual(warnings, []);
 });
@@ -102,7 +102,7 @@ test("failed startup discovery warns and still registers providers", async () =>
 	assert.match(warnings[0], /gateway is down/);
 	assert.deepEqual(
 		registeredProviders.map((provider: any) => provider.id),
-		["bifrost-responses", "bifrost-completions"],
+		["bifrost"],
 	);
 });
 
@@ -123,11 +123,9 @@ test("successful startup discovery preloads the offline refresh path", async () 
 		});
 		assert.deepEqual(warnings, []);
 
-		const completions = registeredProviders.find(
-			(provider: any) => provider.id === "bifrost-completions",
-		);
+		const provider = registeredProviders[0];
 		const outcome: { persist?: unknown } = {};
-		await completions.refreshModels({
+		await provider.refreshModels({
 			credential: undefined,
 			stored: undefined,
 			allowNetwork: false,
@@ -140,7 +138,7 @@ test("successful startup discovery preloads the offline refresh path", async () 
 			},
 		});
 		assert.deepEqual(
-			completions.getModels().map((model: any) => model.id),
+			provider.getModels().map((model: any) => model.id),
 			["startup-chat"],
 		);
 		assert.ok(outcome.persist);
@@ -173,7 +171,7 @@ test("startup discovery prefers CLI flags over env", async () => {
 			seenUrls.length > 0 &&
 				seenUrls.every((url) => url.startsWith("https://flag.example/")),
 		);
-		assert.equal(registeredProviders.length, 2);
+		assert.equal(registeredProviders.length, 1);
 	} finally {
 		setPendingCatalog(undefined);
 	}

@@ -9,7 +9,7 @@ import {
 	canonicalDatasheetId,
 	canonicalLiveModelId,
 	datasheetCandidateScore,
-	resolveApisForBifrostModel,
+	resolvePreferredApi,
 	toPiModelFromDatasheet,
 	toPiModels,
 } from "./model-mapping.ts";
@@ -112,7 +112,14 @@ function buildDatasheetCatalogArtifacts(payload: DatasheetResponse): {
 	capabilities: DatasheetCapabilityIndex;
 	entries: DatasheetLookupIndex;
 } {
-	const bestModels = new Map<string, { score: number; model: PiModel }>();
+	// Single-API publication: the merged provider holds each model once, so
+	// bestModels is keyed by bare id and a responses entry wins over a
+	// completions one regardless of score. Capability/entry indexes stay
+	// per-api: they only feed live-model enrichment.
+	const bestModels = new Map<
+		string,
+		{ score: number; api: CatalogApi; model: PiModel }
+	>();
 	const capabilityScores = new Map<string, number>();
 	const bestEntriesByApi = new Map<
 		string,
@@ -153,9 +160,13 @@ function buildDatasheetCatalogArtifacts(payload: DatasheetResponse): {
 
 			const model = toPiModelFromDatasheet(id, entry, api);
 			if (!model) continue;
-			const existingModel = bestModels.get(mapKey);
-			if (!existingModel || score < existingModel.score) {
-				bestModels.set(mapKey, { score, model });
+			const existingModel = bestModels.get(id);
+			if (
+				!existingModel ||
+				(api === "openai-responses" && existingModel.api !== "openai-responses") ||
+				(api === existingModel.api && score < existingModel.score)
+			) {
+				bestModels.set(id, { score, api, model });
 			}
 		}
 	}
@@ -291,14 +302,14 @@ export async function fetchAuthenticatedCatalog(
 
 	const deduped = new Map<string, PiModel>();
 	for (const model of liveModels) {
-		const apis = resolveApisForBifrostModel(model, datasheetCapabilities);
+		const preferredApi = resolvePreferredApi(model, datasheetCapabilities);
 		const datasheetEntry = resolveDatasheetEntry(
 			model.id,
-			apis,
+			[preferredApi],
 			datasheetEntries,
 		);
-		for (const mapped of toPiModels(model, apis, datasheetEntry)) {
-			deduped.set(`${mapped.api}:${mapped.id}`, mapped);
+		for (const mapped of toPiModels(model, [preferredApi], datasheetEntry)) {
+			deduped.set(mapped.id, mapped);
 		}
 	}
 

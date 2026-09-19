@@ -316,6 +316,21 @@ export function resolveApisForBifrostModel(
 	return ["openai-completions"];
 }
 
+export function resolvePreferredApi(
+	model: BifrostModel,
+	datasheetCapabilities?: ReadonlyMap<string, readonly CatalogApi[]>,
+): CatalogApi {
+	// Single-API publication: a merged provider holds each model once, so a
+	// dual-endpoint model resolves to its preferred API. Responses sorts
+	// first in CATALOG_API_ORDER, completions is the fallback; unknown
+	// models default to completions via resolveApisForBifrostModel.
+	// resolveApisForBifrostModel never returns an empty array (the
+	// completions fallback covers unknown models), so the ?? documents the
+	// invariant instead of asserting with !.
+	const apis = resolveApisForBifrostModel(model, datasheetCapabilities);
+	return apis[0] ?? "openai-completions";
+}
+
 export function toPiModels(
 	model: BifrostModel,
 	apis: readonly CatalogApi[] = apisFromBifrostModel(model),
@@ -488,12 +503,4 @@ export function toPiModelFromDatasheet(
 	if (thinkingLevelMap) model.thinkingLevelMap = thinkingLevelMap;
 	model.compat = compatForApi(api, model.reasoning);
 	return model;
-}
-
-export function filterModelsForApi<T extends PiModel>(
-	models: readonly T[] | undefined,
-	api: CatalogApi,
-): T[] | undefined {
-	if (!models) return undefined;
-	return models.filter((model): model is T => model.api === api);
 }

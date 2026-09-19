@@ -24,9 +24,9 @@ function defaultWarn(message: string): void {
 }
 
 // Best-effort startup model discovery: when a base URL + API key are already
-// available (flags or env), fetch the catalog once so the first refresh of
-// each variant can publish it immediately — even offline. Any failure only
-// warns: providers are always registered and recover via refreshModels with
+// available (flags or env), fetch the catalog once so the first refresh can
+// publish it immediately — even offline. Any failure only warns: the
+// provider is always registered and recovers via refreshModels with
 // the persisted catalog. The entrypoint never throws.
 async function discoverStartupCatalog(
 	flags: BifrostFlagConfig,

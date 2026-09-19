@@ -6,16 +6,16 @@ import {
 } from "./config.ts";
 import type { BifrostFlagConfig } from "./config.ts";
 import { fetchCatalog, shouldFallbackToDatasheet } from "./catalog-source.ts";
-import { asNumber, filterModelsForApi } from "./model-mapping.ts";
+import { asNumber } from "./model-mapping.ts";
 import type { BifrostRuntime } from "./runtime.ts";
 import type {
 	PersistedCatalogEntry,
 	PersistedPiModel,
 	PiModel,
-	ProviderApi,
 	RefreshContext,
 	RegisteredPiModel,
 } from "./types.ts";
+import { BIFROST_PROVIDER_ID } from "./types.ts";
 
 export type RefreshOutcome = {
 	models?: RegisteredPiModel[];
@@ -28,22 +28,19 @@ export type PendingCatalog = {
 };
 
 // Catalog freshly authenticated via /login (or startup discovery). The next
-// refresh of each provider variant publishes it via persist + update — even
-// offline — so a just-configured gateway is usable immediately and survives
-// restarts. Consumption is tracked per provider id because the two variants
-// refresh independently.
+// refresh publishes it via persist + update — even offline — so a
+// just-configured gateway is usable immediately and survives restarts.
+// Consumption is one-shot: a single provider refresh takes it.
 let pendingCatalog: PendingCatalog | undefined;
-const pendingConsumedBy = new Set<string>();
 
 export function setPendingCatalog(catalog: PendingCatalog | undefined): void {
 	pendingCatalog = catalog;
-	pendingConsumedBy.clear();
 }
 
-function takePendingCatalog(providerId: string): PendingCatalog | undefined {
-	if (!pendingCatalog || pendingConsumedBy.has(providerId)) return undefined;
-	pendingConsumedBy.add(providerId);
-	return pendingCatalog;
+function takePendingCatalog(): PendingCatalog | undefined {
+	const catalog = pendingCatalog;
+	pendingCatalog = undefined;
+	return catalog;
 }
 
 export function registerModels(
@@ -72,42 +69,36 @@ function storedCatalogBaseOrigin(
 
 export function restorePersistedModels(
 	providerId: string,
-	api: ProviderApi,
 	stored: PersistedCatalogEntry | undefined,
 	configuredBaseOrigin: string | undefined,
 ): RegisteredPiModel[] | undefined {
-	const filtered = filterModelsForApi<PersistedPiModel>(stored?.models, api);
-	if (filtered === undefined) return undefined;
+	const persisted = stored?.models;
+	if (persisted === undefined) return undefined;
 
-	const persistedBaseOrigin = storedCatalogBaseOrigin(stored, filtered);
+	const persistedBaseOrigin = storedCatalogBaseOrigin(stored, persisted);
 	if (configuredBaseOrigin) {
 		if (!persistedBaseOrigin || persistedBaseOrigin !== configuredBaseOrigin) {
 			return undefined;
 		}
-		return registerModels(filtered, providerId, configuredBaseOrigin);
+		return registerModels(persisted, providerId, configuredBaseOrigin);
 	}
 
 	if (!persistedBaseOrigin) return undefined;
-	return registerModels(filtered, providerId, persistedBaseOrigin);
+	return registerModels(persisted, providerId, persistedBaseOrigin);
 }
 
-export async function refreshVariantModels(
-	providerId: string,
-	api: ProviderApi,
+export async function refreshBifrostModels(
 	runtime: BifrostRuntime,
 	context: RefreshContext,
 	flags?: BifrostFlagConfig,
 ): Promise<RefreshOutcome> {
+	const providerId = BIFROST_PROVIDER_ID;
 	// A freshly authenticated catalog wins over everything else, including
 	// the offline path below: /login must be usable immediately.
-	const pending = takePendingCatalog(providerId);
+	const pending = takePendingCatalog();
 	if (pending) {
 		const published =
-			registerModels(
-				filterModelsForApi(pending.models, api) ?? [],
-				providerId,
-				pending.baseOrigin,
-			) ?? [];
+			registerModels(pending.models, providerId, pending.baseOrigin) ?? [];
 		return {
 			models: published,
 			persist: {
@@ -129,7 +120,6 @@ export async function refreshVariantModels(
 	const configuredBaseOrigin = effective?.baseOrigin;
 	const restored = restorePersistedModels(
 		providerId,
-		api,
 		context.stored,
 		configuredBaseOrigin,
 	);
@@ -158,9 +148,8 @@ export async function refreshVariantModels(
 			context.signal,
 			runtime,
 		);
-		const filtered = filterModelsForApi(allModels, api) ?? [];
 		const refreshed =
-			registerModels(filtered, providerId, effective.baseOrigin) ?? [];
+			registerModels(allModels, providerId, effective.baseOrigin) ?? [];
 		return {
 			models: refreshed,
 			persist: {

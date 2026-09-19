@@ -11,35 +11,32 @@ import {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createBifrostApiKeyAuth } from "./auth.ts";
 import type { BifrostFlagConfig } from "./config.ts";
-import { refreshVariantModels, setPendingCatalog } from "./refresh-models.ts";
+import { refreshBifrostModels, setPendingCatalog } from "./refresh-models.ts";
 import { liveRuntime } from "./runtime.ts";
-import { PROVIDERS } from "./types.ts";
+import { BIFROST_PROVIDER_ID, BIFROST_PROVIDER_NAME } from "./types.ts";
 import type {
 	PersistedCatalogEntry,
 	ProviderApi,
-	ProviderVariant,
 	RefreshContext as BifrostRefreshContext,
 } from "./types.ts";
 import type { BifrostRuntime } from "./runtime.ts";
-
-function providerApi(api: ProviderApi) {
-	if (api === "openai-completions") return openAICompletionsApi();
-	return openAIResponsesApi();
-}
 
 export type BifrostProviderOptions = {
 	flags?: BifrostFlagConfig;
 };
 
+// Single merged provider (opencode pattern): one provider id serving both
+// OpenAI-compatible endpoints. Each model is published once with its
+// preferred API (responses wins for dual-endpoint models), and
+// createProvider dispatches streaming by model.api.
 function createBifrostProvider(
-	variant: ProviderVariant,
 	runtime: BifrostRuntime,
 	options?: BifrostProviderOptions,
 ): Provider<ProviderApi> {
 	let models: readonly Model<ProviderApi>[] = [];
 	const provider = createProvider<ProviderApi>({
-		id: variant.id,
-		name: variant.name,
+		id: BIFROST_PROVIDER_ID,
+		name: BIFROST_PROVIDER_NAME,
 		auth: {
 			apiKey: createBifrostApiKeyAuth({
 				runtime,
@@ -49,16 +46,17 @@ function createBifrostProvider(
 			}),
 		},
 		models: [],
-		api: providerApi(variant.api),
+		api: {
+			"openai-completions": openAICompletionsApi(),
+			"openai-responses": openAIResponsesApi(),
+		},
 	});
 
 	return {
 		...provider,
 		getModels: () => models,
 		refreshModels: async (context: RefreshModelsContext) => {
-			const outcome = await refreshVariantModels(
-				variant.id,
-				variant.api,
+			const outcome = await refreshBifrostModels(
 				runtime,
 				{
 					stored: context.stored as PersistedCatalogEntry | undefined,
@@ -88,21 +86,10 @@ function createBifrostProvider(
 // instead of mutating the array created by createProvider (e.g. via splice).
 // pi reads the catalog through this getter, so replacing the reference is
 // safe here and keeps refresh publication a single assignment.
-export function registerVariant(
-	pi: ExtensionAPI,
-	variant: ProviderVariant,
-	runtime: BifrostRuntime,
-	options?: BifrostProviderOptions,
-): void {
-	pi.registerProvider(createBifrostProvider(variant, runtime, options));
-}
-
 export function registerBifrostProviders(
 	pi: ExtensionAPI,
 	runtime: BifrostRuntime = liveRuntime(),
 	options?: BifrostProviderOptions,
 ): void {
-	for (const variant of PROVIDERS) {
-		registerVariant(pi, variant, runtime, options);
-	}
+	pi.registerProvider(createBifrostProvider(runtime, options));
 }

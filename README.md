@@ -1,8 +1,9 @@
 # pi-bifrost-provider
 
 Pi (0.84.4+) extension registering [getbifrost.ai](https://getbifrost.ai) as
-two native providers: `bifrost-responses` (Responses API) and
-`bifrost-completions` (Chat Completions API).
+a single native provider, `bifrost`, serving both OpenAI-compatible
+endpoints. Each model is listed once: models available on both endpoints
+use the Responses API, chat-only models use Chat Completions.
 
 ## Setup
 
@@ -22,7 +23,7 @@ pi --bifrost-base-url https://your-gateway.example -e ./index.ts
 
 When a base URL + key are available at startup (flags or env), the extension
 fetches the model catalog once so models are listed immediately. If the
-gateway is down, startup logs a warning to stderr and the providers register
+gateway is down, startup logs a warning to stderr and the provider registers
 anyway — the catalog recovers on the next refresh. You can paste a full
 endpoint; trailing `/v1`, `/models`, `/chat/completions`, `/responses` are
 stripped automatically.
